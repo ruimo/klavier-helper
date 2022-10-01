@@ -305,9 +305,8 @@ mod tests {
     use std::any::Any;
     use std::collections::btree_map::Range;
     
-    use crate::helper::bag_store::{BagStore, BagStoreEvent};
-    use crate::helper::changes::Changes;
-    use crate::helper::nan_free_f32::NanFreeF32;
+    use crate::{nan_free_f32::NanFreeF32, changes::Changes};
+    use super::{BagStore, BagStoreEvent};
     
     #[test]
     fn get_empty() {
