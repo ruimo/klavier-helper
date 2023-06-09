@@ -2,7 +2,7 @@
 name = "klavier-helper"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.63"
+rust-version = "1.65"
 description = "Helper library of klavier."
 license = "Apache-2.0"
 

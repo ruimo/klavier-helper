@@ -12,7 +12,6 @@ pub enum BagStoreEvent<K, T, M> {
     ClearAll,
     Change(Box<dyn Changes<K, T>>),
     AddAll { added: BTreeMap<K, Vec<T>>, metadata: M },
-    BulkRemove(Box<dyn BulkRemove<K, T>>),
 }
 
 pub struct Iter<'a, K, T> {
@@ -259,13 +258,6 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         self.add_all(map, metadata);
     }
 
-    pub fn bulk_remove<R>(&mut self, remove: R) where R: BulkRemove<K, T> + 'static, K: Clone, T: Clone {
-        for (k, v) in remove.iter() {
-            self.remove_internal(&k, &v);
-        }
-        self.fire_event(|| BagStoreEvent::BulkRemove(Box::new(remove)));
-    }
-    
     #[inline]
     pub fn len(&self) -> usize {
         self.count
