@@ -1,5 +1,5 @@
 use std::{ops::{RangeBounds, Bound, Index}, slice::Iter};
-use super::{changes::Changes, bulk_remove::BulkRemove};
+use super::{changes::Changes};
 
 #[derive(Clone)]
 pub enum StoreEvent<K, T, M> {
@@ -7,7 +7,6 @@ pub enum StoreEvent<K, T, M> {
     Remove(T),
     ClearAll,
     Change { changed: Box<dyn Changes<K, T>>, removed: Vec<(K, T)> },
-    BulkRemove(Box<dyn BulkRemove<K, T>>),
     BulkAdd { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
 }
 
@@ -148,13 +147,6 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         }
         self.fire_event(|| StoreEvent::Change { changed: Box::new(changes), removed: removed.clone() });
         removed
-    }
-
-    pub fn bulk_remove<R>(&mut self, remove: R) where R: BulkRemove<K, T> + 'static, K: Clone, T: Clone {
-        for (k, _v) in remove.iter() {
-            self.remove_internal(&k);
-        }
-        self.fire_event(|| StoreEvent::BulkRemove(Box::new(remove)));
     }
 
     pub fn bulk_add(&mut self, recs: Vec<(K, T)>, metadata: M) -> Vec<(K, T)> where K: Clone, T: Clone {

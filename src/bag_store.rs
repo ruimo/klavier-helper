@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, btree_map::{Entry, self}}, borrow::Borrow, ops::RangeBounds};
 
-use super::{changes::Changes, bulk_remove::BulkRemove};
+use super::{changes::Changes};
 
 #[derive(Clone)]
 pub enum BagStoreEvent<K, T, M> {
