@@ -4,14 +4,14 @@ use super::{changes::Changes};
 
 #[derive(Clone)]
 pub enum BagStoreEvent<K, T, M> {
-    Add(T),
+    Add { added: T, metadata: M },
     AddVec(Vec<T>),
     Remove(T),
     RemoveVec(Vec<T>),
-    RemoveAll(BTreeMap<K, Vec<T>>),
+    RemoveAll(Vec<(K, T)>),
     ClearAll,
     Change(Box<dyn Changes<K, T>>),
-    AddAll { added: BTreeMap<K, Vec<T>>, metadata: M },
+    BulkAddedRemoved { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
 }
 
 pub struct Iter<'a, K, T> {
@@ -120,9 +120,9 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         self.store.iter().last()
     }
     
-    pub fn add(&mut self, key: K, e: T) where K: Clone, T: Clone {
+    pub fn add(&mut self, key: K, e: T, metadata: M) where K: Clone, T: Clone {
         self.add_internal(key.clone(), e.clone());
-        self.fire_event(|| BagStoreEvent::Add(e));
+        self.fire_event(|| BagStoreEvent::Add { added: e, metadata });
     }
     
     // Does not notify observers.
@@ -200,11 +200,13 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         ret
     }
     
-    pub fn remove_all(&mut self, map: BTreeMap<K, Vec<T>>) where K: Clone {
-        let mut removed = BTreeMap::new();
+    pub fn remove_all(&mut self, to_remove: &[(K, T)]) where K: Clone, T: Clone {
+        let mut removed: Vec<(K, T)> = Vec::with_capacity(to_remove.len());
         
-        for (key, vec) in map.iter() {
-            removed.insert(key.clone(), self.remove_vec_internal(key, vec));
+        for (k, v) in to_remove.iter() {
+            if let Some(r) = self.remove_internal(k, v) {
+                removed.push((k.clone(), r));
+            }
         }
         
         self.fire_event(|| BagStoreEvent::RemoveAll(removed));
@@ -216,11 +218,11 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         self.fire_event(|| BagStoreEvent::ClearAll);
     }
     
-    fn add_all(&mut self, map: BTreeMap<K, Vec<T>>, metadata: M) where K: Clone {
-        for (key, value) in map.iter() {
-            self.add_vec_internal(key.clone(), value.clone());
+    fn add_all(&mut self, models: Vec<(K, T)>, metadata: M) where K: Clone, T: Clone {
+        for (key, value) in models.iter() {
+            self.add_internal(key.clone(), value.clone());
         }
-        self.fire_event(|| BagStoreEvent::AddAll { added: map, metadata });
+        self.fire_event(|| BagStoreEvent::BulkAddedRemoved { added: models, removed: vec![], metadata });
     }
     
     pub fn range_vec<B, R>(&self, range: R) -> std::collections::btree_map::Range<'_, K, Vec<T>>
@@ -255,7 +257,19 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
             map.entry(k.clone()).or_insert(Vec::new()).push(v.clone());
         }
 
-        self.add_all(map, metadata);
+        self.add_all(models, metadata);
+    }
+
+    pub fn bulk_remove(&mut self, models: &[(K, T)], metadata: M) -> Vec<(K, T)> where K: Clone, T: Clone {
+        let mut removed: Vec<(K, T)> = Vec::with_capacity(models.len());
+
+        for (k, t) in models.iter() {
+            self.remove_internal(k, t);
+            removed.push((k.clone(), t.clone()));
+        }
+
+        self.fire_event(|| BagStoreEvent::BulkAddedRemoved { added: vec![], removed: removed.clone(), metadata });
+        removed
     }
 
     #[inline]
@@ -309,7 +323,7 @@ mod tests {
     #[test]
     fn add_one() {
         let mut store: BagStore<NanFreeF32, &str, i32> = BagStore::new(false);
-        store.add(0.0.into(), "Hello");
+        store.add(0.0.into(), "Hello", 0);
         assert!(store.get(1.0.into()).is_empty());
         let result = store.get(0.0.into());
         assert_eq!(result.len(), 1);
@@ -319,9 +333,9 @@ mod tests {
     #[test]
     fn add_multiple() {
         let mut store: BagStore<NanFreeF32, &str, i32> = BagStore::new(false);
-        store.add(1.0.into(), "Hello");
-        store.add(1.0.into(), "World");
-        store.add(2.0.into(), "Foo");
+        store.add(1.0.into(), "Hello", 0);
+        store.add(1.0.into(), "World", 0);
+        store.add(2.0.into(), "Foo", 0);
         assert!(store.get(0.0.into()).is_empty());
         let result = store.get(1.0.into());
         assert_eq!(result.len(), 2);
@@ -342,9 +356,9 @@ mod tests {
     #[test]
     fn remove() {
         let mut store: BagStore<NanFreeF32, &str, i32> = BagStore::new(false);
-        store.add(0.0.into(), "Hello");
-        store.add(0.0.into(), "World");
-        store.add(1.0.into(), "Foo");
+        store.add(0.0.into(), "Hello", 0);
+        store.add(0.0.into(), "World", 0);
+        store.add(1.0.into(), "Foo", 0);
         
         assert_eq!(store.remove(&0.0.into(), &"Hello"), Some("Hello"));
         let vec0 = store.get(0.0.into());
@@ -368,7 +382,7 @@ mod tests {
         let mut store: BagStore<NanFreeF32, &str, i32> = BagStore::new(false);
         assert_eq!(store.pop_first(), None);
         
-        store.add(0.0.into(), "Hello");
+        store.add(0.0.into(), "Hello", 0);
         assert_eq!(store.pop_first(), Some((0.0.into(), vec!["Hello"])));
         assert_eq!(store.pop_first(), None);
     }
@@ -376,10 +390,10 @@ mod tests {
     #[test]
     fn range_vec() {
         let mut store: BagStore<NanFreeF32, &str, i32> = BagStore::new(false);
-        store.add(0.0.into(), "Hello");
-        store.add(0.0.into(), "World");
-        store.add(1.0.into(), "Foo");
-        store.add(1.0.into(), "Bar");
+        store.add(0.0.into(), "Hello", 0);
+        store.add(0.0.into(), "World", 0);
+        store.add(1.0.into(), "Foo", 0);
+        store.add(1.0.into(), "Bar", 0);
         
         let mut z: Range<'_, NanFreeF32, Vec<&str>> = 
         store.range_vec::<NanFreeF32, std::ops::Range<NanFreeF32>>(NanFreeF32::from(-0.1)..NanFreeF32::from(0.0));
@@ -434,14 +448,15 @@ mod tests {
     #[test]
     fn observe() {
         let mut store: BagStore<NanFreeF32, &str, i32> = BagStore::new(true);
-        store.add(0.0.into(), "Hello");
+        store.add(0.0.into(), "Hello", 123);
 
         {
             let events = store.events();
             assert_eq!(events.len(), 1);
             match events[0] {
-                BagStoreEvent::Add(s) => {
-                    assert_eq!(s, "Hello");
+                BagStoreEvent::Add { added, metadata } => {
+                    assert_eq!(added, "Hello");
+                    assert_eq!(metadata, 123);
                 },
                 _ => {
                     panic!("Test failed.");
@@ -472,8 +487,8 @@ mod tests {
     #[test]
     fn change() {
         let mut store: BagStore<NanFreeF32, &str, i32> = BagStore::new(true);
-        store.add(0.0.into(), "Hello");
-        store.add(0.0.into(), "World");
+        store.add(0.0.into(), "Hello", 0);
+        store.add(0.0.into(), "World", 0);
         
         #[derive(Debug, Clone)]
         struct MyChanges {
@@ -537,11 +552,11 @@ mod tests {
         let mut store: BagStore<NanFreeF32, &str, i32> = BagStore::new(true);
         assert_eq!(store.iter().next(), None);
 
-        store.add(0.0.into(), "Hello");
-        store.add(0.0.into(), "World");
-        store.add(1.0.into(), "Foo");
-        store.add(1.0.into(), "Bar");
-        store.add(2.0.into(), "Hoge");
+        store.add(0.0.into(), "Hello", 0);
+        store.add(0.0.into(), "World", 0);
+        store.add(1.0.into(), "Foo", 0);
+        store.add(1.0.into(), "Bar", 0);
+        store.add(2.0.into(), "Hoge", 0);
 
         let mut z = store.iter();
         assert_eq!(z.next(), Some((&0.0.into(), &"Hello")));
@@ -558,11 +573,11 @@ mod tests {
         let mut z = store.range(..);
         assert_eq!(z.next(), None);
 
-        store.add(0.0.into(), "Hello");
-        store.add(0.0.into(), "World");
-        store.add(1.0.into(), "Foo");
-        store.add(1.0.into(), "Bar");
-        store.add(2.0.into(), "Hoge");
+        store.add(0.0.into(), "Hello", 0);
+        store.add(0.0.into(), "World", 0);
+        store.add(1.0.into(), "Foo", 0);
+        store.add(1.0.into(), "Bar", 0);
+        store.add(2.0.into(), "Hoge", 0);
 
         let mut z = store.range(NanFreeF32::from(0.0)..);
         assert_eq!(z.next(), Some((&0.0.into(), &"Hello")));

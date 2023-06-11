@@ -3,11 +3,11 @@ use super::{changes::Changes};
 
 #[derive(Clone)]
 pub enum StoreEvent<K, T, M> {
-    Add(T),
+    Add { added: T, metadata: M },
     Remove(T),
     ClearAll,
     Change { changed: Box<dyn Changes<K, T>>, removed: Vec<(K, T)> },
-    BulkAdd { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
+    BulkAddedRemoved { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
 }
 
 pub struct Store<K: Ord + Copy, T: Clone, M> {
@@ -44,13 +44,13 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         }
     }
 
-    pub fn add(&mut self, key: K, value: T) -> Option<T> {
+    pub fn add(&mut self, key: K, value: T, metadata: M) -> Option<T> {
         let mut removed: Option<T> = None;
         if let Some(r) = self.add_internal(key, value.clone()) {
             removed = Some(r.clone());
             self.fire_event(|| StoreEvent::Remove(r));
         }
-        self.fire_event(|| StoreEvent::Add(value));
+        self.fire_event(|| StoreEvent::Add { added: value, metadata });
         removed
     }
 
@@ -72,7 +72,6 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         let ret = self.remove_internal(key);
         if let Some(removed) = ret.as_ref() {
             self.fire_event(|| StoreEvent::Remove(removed.1.clone()));
-
         }
         ret
     }
@@ -157,7 +156,20 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
                 removed.push((*k, r));
             }
         }
-        self.fire_event(|| StoreEvent::BulkAdd { added: recs, removed: removed.clone(), metadata });
+        self.fire_event(|| StoreEvent::BulkAddedRemoved { added: recs, removed: removed.clone(), metadata });
+
+        removed
+    }
+
+    pub fn bulk_remove(&mut self, recs: &[(K, T)], metadata: M) -> Vec<(K, T)> {
+        let mut removed: Vec<(K, T)> = Vec::with_capacity(recs.len());
+
+        for (k, _) in recs.iter() {
+            if let Some(r) = self.remove_internal(k) {
+                removed.push(r);
+            }
+        }
+        self.fire_event(|| StoreEvent::BulkAddedRemoved { added: vec![], removed: removed.clone(), metadata });
 
         removed
     }
