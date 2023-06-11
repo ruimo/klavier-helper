@@ -6,7 +6,9 @@ jobs:
   beta_release:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
     - name: cargo plugin cache
       id: cargo-plugin-cache
       uses: actions/cache@v2
@@ -20,5 +22,6 @@ jobs:
       run: |
         git config --global user.email "ruimo.uno@gmail.com"
         git config --global user.name "Shisei Hanai"
+        cargo login ${{ secrets.KLAVIER_HELPER }}
         git status
-        cargo release -vv beta --execute --no-confirm --token ${{ secrets.KLAVIER_HELPER }}
+        cargo release -vv beta --execute --no-confirm
