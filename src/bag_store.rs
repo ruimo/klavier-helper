@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, btree_map::{Entry, self}}, borrow::Borrow, ops::RangeBounds};
+use std::{collections::{BTreeMap, btree_map::{Entry, self}}, borrow::Borrow, ops::RangeBounds, rc::Rc};
 
 use super::{changes::Changes};
 
@@ -10,7 +10,7 @@ pub enum BagStoreEvent<K, T, M> {
     RemoveVec(Vec<T>),
     RemoveAll(Vec<(K, T)>),
     ClearAll,
-    Change(Box<dyn Changes<K, T>>),
+    Changed { from_to: Vec<((K, T), (K, T))>, removed: Vec<(K, T)>, metadata: M },
     BulkAddedRemoved { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
 }
 
@@ -242,12 +242,23 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         }
     }
 
-    pub fn change<C>(&mut self, changes: C) where C: Changes<K, T> + 'static, T: Clone, K: Clone {
-        for (from, to) in changes.iter() {
-            self.remove_internal(&from.0, &from.1);
-            self.add_internal(to.0, to.1.clone());
+    pub fn change(&mut self, from_to: &[((K, T), (K, T))], metadata: M) where T: Clone, K: Clone {
+        let mut result: Vec<((K, T), (K, T))> = Vec::with_capacity(from_to.len());
+
+        // Remove all 'from's in advance because adding 'to' will replace(remove) the existing 'from'.
+        for ((from_k, from_v), to) in from_to.iter() {
+            if let Some(removed) = self.remove_internal(&from_k.clone(), &from_v.clone()) {
+                result.push((
+                    ((*from_k).clone(), removed), to.clone()
+                ));
+            }
         }
-        self.fire_event(|| BagStoreEvent::Change(Box::new(changes)));
+
+        for (_, (k, v)) in result.iter() {
+            self.add_internal(k.clone(), v.clone());
+        }
+
+        self.fire_event(|| BagStoreEvent::Changed { from_to: result, removed: vec![], metadata });
     }
 
     pub fn bulk_add(&mut self, models: Vec<(K, T)>, metadata: M) where K: Clone, T: Clone {
@@ -490,39 +501,7 @@ mod tests {
         store.add(0.0.into(), "Hello", 0);
         store.add(0.0.into(), "World", 0);
         
-        #[derive(Debug, Clone)]
-        struct MyChanges {
-            changes: Vec<((NanFreeF32, &'static str), (NanFreeF32, &'static str))>
-        }
-
-        impl Changes<NanFreeF32, &'static str> for MyChanges {
-            fn iter(&self) -> Box<dyn Iterator<Item = ((NanFreeF32, &'static str), (NanFreeF32, &'static str))> + '_> {
-                Box::new(
-                    self.changes
-                    .iter()
-                    .map(|((from_key, from_value), (to_key, to_value))| {
-                        ((*from_key, *from_value), (*to_key, *to_value))
-                    })
-                )
-            }
-            
-            fn len(&self) -> usize {
-                self.changes.len()
-            }
-            
-            fn clone_trait(&self) -> Box<dyn Changes<NanFreeF32, &'static str>> {
-                Box::new(self.clone())
-            }
-            
-            fn as_any(&self) -> &dyn Any {
-                self
-            }
-        }
-        
-        let changes = MyChanges {
-            changes: vec![((0.0.into(), "Hello"), (1.0.into(), "Foo"))]
-        };
-        store.change(changes);
+        store.change(&vec![((0.0.into(), "Hello"), (1.0.into(), "Foo"))], 123);
         
         let vec0 = store.get(0.0.into());
         assert_eq!(vec0.len(), 1);
@@ -535,16 +514,27 @@ mod tests {
         let events = store.events();
         assert_eq!(events.len(), 3);
         
-        if let BagStoreEvent::Change(c) = &events[2] {
-            let mc: &MyChanges = c.as_any()
-            .downcast_ref::<MyChanges>()
-            .expect("Logic error!");
-            assert_eq!(mc.changes.len(), 1);
-            assert_eq!(mc.changes[0].0, (0.0.into(), "Hello"));
-            assert_eq!(mc.changes[0].1, (1.0.into(), "Foo"));
-        } else {
-            panic!("Logic error.");
+        match &events[2] {
+            BagStoreEvent::Changed { from_to, removed, metadata } => {
+            assert_eq!(from_to.len(), 1);
+            assert_eq!(removed.len(), 0);
+            assert_eq!(from_to[0].0, (0.0.into(), "Hello"));
+            assert_eq!(from_to[0].1, (1.0.into(), "Foo"));
+            assert_eq!(*metadata, 123);
+            },
+            _ => panic!("Logic error."),
         }
+
+//        if let BagStoreEvent::Change(c) = &events[2] {
+//            let mc: &MyChanges = c.as_any()
+//            .downcast_ref::<MyChanges>()
+//            .expect("Logic error!");
+//            assert_eq!(mc.changes.len(), 1);
+//            assert_eq!(mc.changes[0].0, (0.0.into(), "Hello"));
+//            assert_eq!(mc.changes[0].1, (1.0.into(), "Foo"));
+//        } else {
+            //panic!("Logic error.");
+//        }
     }
 
     #[test]

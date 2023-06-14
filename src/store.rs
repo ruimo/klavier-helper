@@ -6,8 +6,8 @@ pub enum StoreEvent<K, T, M> {
     Add { added: T, metadata: M },
     Remove(T),
     ClearAll,
-    Change { changed: Box<dyn Changes<K, T>>, removed: Vec<(K, T)> },
     BulkAddedRemoved { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
+    Changed { from_to: Vec<((K, T), (K, T))>, removed: Vec<(K, T)>, metadata: M },
 }
 
 pub struct Store<K: Ord + Copy, T: Clone, M> {
@@ -134,17 +134,24 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         }
     }
 
-    pub fn change<C>(&mut self, changes: C) -> Vec<(K, T)> where C: Changes<K, T> + 'static, T: Clone {
-        let mut removed = vec![];
-        for ((from_key, _), _) in changes.iter() {
-            self.remove_internal(&from_key);
-        }
-        for (_, (to_key, to_value)) in changes.iter() {
-            if let Some(r) = self.add_internal(to_key.clone(), to_value.clone()) {
-                removed.push((to_key, r));
+    pub fn change(&mut self, from_to: &[(&K, (K, T))], metadata: M) -> Vec<(K, T)> where T: Clone {
+        let mut result: Vec<((K, T), (K, T))> = Vec::with_capacity(from_to.len());
+
+        // Remove all 'from's in advance because adding 'to' will replace(remove) the existing 'from'.
+        for (k, to) in from_to.iter() {
+            if let Some(removed) = self.remove_internal(*k) {
+                result.push((removed, to.clone()));
             }
         }
-        self.fire_event(|| StoreEvent::Change { changed: Box::new(changes), removed: removed.clone() });
+
+        // Adding 'to's may replace the existing.
+        let mut removed = vec![];
+        for (_, (k, v)) in result.iter() {
+            if let Some(r) = self.add_internal(k.clone(), v.clone()) {
+                removed.push((k.clone(), r));
+            }
+        }
+        self.fire_event(|| StoreEvent::Changed { from_to: result, removed: removed.clone(), metadata });
         removed
     }
 
@@ -161,10 +168,10 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         removed
     }
 
-    pub fn bulk_remove(&mut self, recs: &[(K, T)], metadata: M) -> Vec<(K, T)> {
+    pub fn bulk_remove(&mut self, recs: &[K], metadata: M) -> Vec<(K, T)> {
         let mut removed: Vec<(K, T)> = Vec::with_capacity(recs.len());
 
-        for (k, _) in recs.iter() {
+        for k in recs.iter() {
             if let Some(r) = self.remove_internal(k) {
                 removed.push(r);
             }
