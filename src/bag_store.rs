@@ -1,15 +1,13 @@
-use std::{collections::{BTreeMap, btree_map::{Entry, self}}, borrow::Borrow, ops::RangeBounds, rc::Rc};
-
-use super::{changes::Changes};
+use std::{collections::{BTreeMap, btree_map::{Entry, self}}, borrow::Borrow, ops::RangeBounds};
 
 #[derive(Clone)]
 pub enum BagStoreEvent<K, T, M> {
-    Add { added: T, metadata: M },
-    AddVec(Vec<T>),
-    Remove(T),
-    RemoveVec(Vec<T>),
-    RemoveAll(Vec<(K, T)>),
-    ClearAll,
+    Added { added: T, metadata: M },
+    AddedVec { added: Vec<T>, metadata: M },
+    Removed(T),
+    RemovedVec(Vec<T>),
+    RemovedAll(Vec<(K, T)>),
+    ClearedAll,
     Changed { from_to: Vec<((K, T), (K, T))>, removed: Vec<(K, T)>, metadata: M },
     BulkAddedRemoved { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
 }
@@ -107,7 +105,7 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         if let Some(k) = key {
             let ret = self.store.remove_entry(&k);
             if let Some((k, v)) = ret {
-                self.fire_event(|| BagStoreEvent::RemoveVec(v.clone()));
+                self.fire_event(|| BagStoreEvent::RemovedVec(v.clone()));
                 self.count -= v.len();
                 return Some((k, v));
             }
@@ -122,7 +120,7 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
     
     pub fn add(&mut self, key: K, e: T, metadata: M) where K: Clone, T: Clone {
         self.add_internal(key.clone(), e.clone());
-        self.fire_event(|| BagStoreEvent::Add { added: e, metadata });
+        self.fire_event(|| BagStoreEvent::Added { added: e, metadata });
     }
     
     // Does not notify observers.
@@ -131,13 +129,13 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         self.count += 1;
     }
     
-    pub fn add_vec(&mut self, key: K, e: Vec<T>) where T: Clone {
+    pub fn add_vec(&mut self, key: K, e: Vec<T>, metadata: M) where T: Clone {
         let vec = self.events.as_ref().map(|_| e.clone());
         
         self.add_vec_internal(key, e);
         
         if let Some(v) = vec {
-            self.fire_event(|| BagStoreEvent::AddVec(v));
+            self.fire_event(|| BagStoreEvent::AddedVec{ added: v, metadata });
         }
     }
 
@@ -156,14 +154,14 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
     pub fn remove(&mut self, key: &K, e: &T) -> Option<T> where K: Clone, T: Clone {
         let ret = self.remove_internal(key, e);
         if ret.is_some() {
-            self.fire_event(|| BagStoreEvent::Remove(e.clone()));
+            self.fire_event(|| BagStoreEvent::Removed(e.clone()));
         }
         ret
     }
     
     pub fn remove_vec(&mut self, key: &K, value_table: &Vec<T>) where K: Clone, T: Clone {
         let removed: Vec<T> = self.remove_vec_internal(key, value_table);
-        self.fire_event(|| BagStoreEvent::RemoveVec(removed));
+        self.fire_event(|| BagStoreEvent::RemovedVec(removed));
     }
     
     fn remove_vec_internal(&mut self, key: &K, value_table: &Vec<T>) -> Vec<T> where K: Clone, T: Clone {
@@ -209,13 +207,13 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
             }
         }
         
-        self.fire_event(|| BagStoreEvent::RemoveAll(removed));
+        self.fire_event(|| BagStoreEvent::RemovedAll(removed));
     }
     
     pub fn clear(&mut self) {
         self.store.clear();
         self.count = 0;
-        self.fire_event(|| BagStoreEvent::ClearAll);
+        self.fire_event(|| BagStoreEvent::ClearedAll);
     }
     
     fn add_all(&mut self, models: Vec<(K, T)>, metadata: M) where K: Clone, T: Clone {
@@ -319,10 +317,9 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
 
 #[cfg(test)]
 mod tests {
-    use std::any::Any;
     use std::collections::btree_map::Range;
     
-    use crate::{nan_free_f32::NanFreeF32, changes::Changes};
+    use crate::{nan_free_f32::NanFreeF32};
     use super::{BagStore, BagStoreEvent};
     
     #[test]
@@ -465,7 +462,7 @@ mod tests {
             let events = store.events();
             assert_eq!(events.len(), 1);
             match events[0] {
-                BagStoreEvent::Add { added, metadata } => {
+                BagStoreEvent::Added { added, metadata } => {
                     assert_eq!(added, "Hello");
                     assert_eq!(metadata, 123);
                 },
@@ -485,7 +482,7 @@ mod tests {
             assert_eq!(events.len(), 2);
             let e = &events[1];
             match e {
-                BagStoreEvent::Remove(s) => {
+                BagStoreEvent::Removed(s) => {
                     assert_eq!(*s, "Hello");
                 },
                 _ => {

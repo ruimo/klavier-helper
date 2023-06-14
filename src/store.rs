@@ -1,11 +1,10 @@
 use std::{ops::{RangeBounds, Bound, Index}, slice::Iter};
-use super::{changes::Changes};
 
 #[derive(Clone)]
 pub enum StoreEvent<K, T, M> {
-    Add { added: T, metadata: M },
-    Remove(T),
-    ClearAll,
+    Added { added: T, metadata: M },
+    Removed(T),
+    ClearedAll,
     BulkAddedRemoved { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
     Changed { from_to: Vec<((K, T), (K, T))>, removed: Vec<(K, T)>, metadata: M },
 }
@@ -48,9 +47,9 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         let mut removed: Option<T> = None;
         if let Some(r) = self.add_internal(key, value.clone()) {
             removed = Some(r.clone());
-            self.fire_event(|| StoreEvent::Remove(r));
+            self.fire_event(|| StoreEvent::Removed(r));
         }
-        self.fire_event(|| StoreEvent::Add { added: value, metadata });
+        self.fire_event(|| StoreEvent::Added { added: value, metadata });
         removed
     }
 
@@ -71,7 +70,7 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
     pub fn remove(&mut self, key: &K) -> Option<(K, T)> {
         let ret = self.remove_internal(key);
         if let Some(removed) = ret.as_ref() {
-            self.fire_event(|| StoreEvent::Remove(removed.1.clone()));
+            self.fire_event(|| StoreEvent::Removed(removed.1.clone()));
         }
         ret
     }
@@ -192,7 +191,7 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         }
 
         let (k, v) = self.store.remove(0);
-        self.fire_event(|| StoreEvent::Remove(v.clone()));
+        self.fire_event(|| StoreEvent::Removed(v.clone()));
 
         Some((k, v))
     }
@@ -204,7 +203,7 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
 
     pub fn clear(&mut self) {
         self.store.clear();
-        self.fire_event(|| StoreEvent::ClearAll);
+        self.fire_event(|| StoreEvent::ClearedAll);
     }
 
     pub fn clear_events(&mut self) {
