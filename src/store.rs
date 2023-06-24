@@ -9,6 +9,7 @@ pub enum StoreEvent<K, T, M> {
     Changed { from_to: Vec<((K, T), (K, T))>, removed: Vec<(K, T)>, metadata: M },
 }
 
+#[derive(Clone)]
 pub struct Store<K: Ord + Copy, T: Clone, M> {
     store: Vec<(K, T)>,
     events: Option<Vec<StoreEvent<K, T, M>>>,

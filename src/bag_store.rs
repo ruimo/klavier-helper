@@ -71,6 +71,7 @@ impl<'a, K, T> Iterator for RangeIter<'a, K, T> {
     }
 }
 
+#[derive(Clone)]
 pub struct BagStore<K, T, M> {
     store: BTreeMap<K, Vec<T>>,
     empty: Vec<T>,
