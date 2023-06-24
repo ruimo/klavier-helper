@@ -6,7 +6,6 @@ pub enum BagStoreEvent<K, T, M> {
     AddedVec { added: Vec<T>, metadata: M },
     Removed(T),
     RemovedVec(Vec<T>),
-    RemovedAll(Vec<(K, T)>),
     ClearedAll,
     Changed { from_to: Vec<((K, T), (K, T))>, removed: Vec<(K, T)>, metadata: M },
     BulkAddedRemoved { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
@@ -198,29 +197,10 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         ret
     }
     
-    pub fn remove_all(&mut self, to_remove: &[(K, T)]) where K: Clone, T: Clone {
-        let mut removed: Vec<(K, T)> = Vec::with_capacity(to_remove.len());
-        
-        for (k, v) in to_remove.iter() {
-            if let Some(r) = self.remove_internal(k, v) {
-                removed.push((k.clone(), r));
-            }
-        }
-        
-        self.fire_event(|| BagStoreEvent::RemovedAll(removed));
-    }
-    
     pub fn clear(&mut self) {
         self.store.clear();
         self.count = 0;
         self.fire_event(|| BagStoreEvent::ClearedAll);
-    }
-    
-    fn add_all(&mut self, models: Vec<(K, T)>, metadata: M) where K: Clone, T: Clone {
-        for (key, value) in models.iter() {
-            self.add_internal(key.clone(), value.clone());
-        }
-        self.fire_event(|| BagStoreEvent::BulkAddedRemoved { added: models, removed: vec![], metadata });
     }
     
     pub fn range_vec<B, R>(&self, range: R) -> std::collections::btree_map::Range<'_, K, Vec<T>>
@@ -260,21 +240,19 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
     }
 
     pub fn bulk_add(&mut self, models: Vec<(K, T)>, metadata: M) where K: Clone, T: Clone {
-        let mut map: BTreeMap<K, Vec<T>> = BTreeMap::new();
-
-        for (k, v) in models.iter() {
-            map.entry(k.clone()).or_insert(Vec::new()).push(v.clone());
+        for (key, value) in models.iter() {
+            self.add_internal(key.clone(), value.clone());
         }
-
-        self.add_all(models, metadata);
+        self.fire_event(|| BagStoreEvent::BulkAddedRemoved { added: models, removed: vec![], metadata });
     }
 
     pub fn bulk_remove(&mut self, models: &[(K, T)], metadata: M) -> Vec<(K, T)> where K: Clone, T: Clone {
         let mut removed: Vec<(K, T)> = Vec::with_capacity(models.len());
 
         for (k, t) in models.iter() {
-            self.remove_internal(k, t);
-            removed.push((k.clone(), t.clone()));
+            if let Some(r) = self.remove_internal(k, t) {
+                removed.push((k.clone(), r));
+            }
         }
 
         self.fire_event(|| BagStoreEvent::BulkAddedRemoved { added: vec![], removed: removed.clone(), metadata });
