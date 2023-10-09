@@ -1,6 +1,6 @@
 use std::{ops::{RangeBounds, Bound, Index}, slice::Iter};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum StoreEvent<K, T, M> {
     Added { added: T, metadata: M },
     Removed(T),
