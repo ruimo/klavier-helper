@@ -29,6 +29,13 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         }
     }
 
+    pub fn with_capacity(capacity: usize, hold_events: bool) -> Self {
+        Self { 
+            store: Vec::with_capacity(capacity),
+            events: if hold_events { Some(vec![]) } else { None },
+        }
+    }
+
     pub fn index(&self, key: K) -> Result<usize, usize> {
         self.store.binary_search_by_key(&key, |&(k, _)| k)
     }
@@ -290,8 +297,6 @@ impl <'a, K: Ord + Copy, T: Clone, M> Finder<'a, K, T, M> {
                 }
             None => self.find_locator(k).map(|l| &self.store[l])
         }
-
-
     }
 }
 
