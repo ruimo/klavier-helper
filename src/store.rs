@@ -95,9 +95,9 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         }
     }
     
-    pub fn range<R>(&self, bounds: R) -> (usize, Iter<'_, (K, T)>) where R: RangeBounds<K> {
+    pub fn range<R>(&self, bounds: R) -> (usize, &[(K, T)]) where R: RangeBounds<K> {
         if self.store.is_empty() {
-            return (0, self.store[0..0].iter())
+            return (0, &self.store[0..0])
         }
 
         let start_bound: usize =
@@ -129,15 +129,15 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
                 Bound::Included(i) => {
                     match self.find(i) {
                         Ok(i) => i + 1,
-                        Err(i) => i + 1,
+                        Err(i) => i,
                     }
                 },
             };
 
         if start_bound == end_bound {
-            (0, self.store[0..0].iter())
+            (0, &self.store[0..0])
         } else {
-            (start_bound, self.store[start_bound..end_bound].iter())
+            (start_bound, &self.store[start_bound..end_bound])
         }
     }
 
@@ -345,5 +345,16 @@ mod tests {
         assert_eq!(finder.just_before(19), Some(&(10, "10")));
         assert_eq!(finder.just_before(20), Some(&(20, "20")));
         assert_eq!(finder.just_before(21), Some(&(20, "20")));
+    }
+
+    #[test]
+    fn inclusive() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+
+        let (idx, mut itr) = store.range(0..=i32::MAX);
+        assert_eq!(idx, 0);
+        assert_eq!(itr.next(), Some(&(10, "10")));
+        assert_eq!(itr.next(), None);
     }
 }
