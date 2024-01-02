@@ -354,7 +354,7 @@ mod tests {
 
         let (idx, mut itr) = store.range(0..=i32::MAX);
         assert_eq!(idx, 0);
-        assert_eq!(itr.next(), Some(&(10, "10")));
-        assert_eq!(itr.next(), None);
+        assert_eq!(itr.len(), 1);
+        assert_eq!(itr[0], (10, "10"));
     }
 }
