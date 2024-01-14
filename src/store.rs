@@ -229,9 +229,51 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         self.events.as_ref().expect("Event hold option is disabled. Call new(true).")
     }
 
-    pub fn update(&mut self, idx: usize, new_value: T) {
-        let e = &self.store[idx];
-        self.store[idx] = (e.0, new_value);
+    pub fn update_at_idx(&mut self, idx: usize, new_value: T, metadata: M) {
+        if self.events.is_none() {
+            let e = &self.store[idx];
+            self.store[idx] = (e.0, new_value);
+        } else {
+            let e = &self.store[idx].clone();
+            self.store[idx] = (e.0, new_value.clone());
+            self.fire_event(|| StoreEvent::Changed {
+                from_to: vec![(e.clone(), (e.0, new_value))], removed: vec![], metadata    
+            });
+        }
+    }
+
+    pub fn replace(&mut self, k: &K, metadata: M, f: impl FnOnce(Option<&T>) -> T) {
+        if self.events.is_none() {
+            match self.find(k) {
+                Ok(idx) => {
+                    let current = &self.store[idx];
+                    let new_value = f(Some(&current.1));
+                    self.store[idx] = (*k, new_value);
+                }
+                Err(idx) => {
+                    let new_value = f(None);
+                    self.store.insert(idx, (*k, new_value));
+                }
+            }
+        } else {
+            match self.find(k) {
+                Ok(idx) => {
+                    let current = self.store[idx].clone();
+                    let new_value = f(Some(&current.1));
+                    self.store[idx] = (*k, new_value.clone());
+                    self.fire_event(|| StoreEvent::Changed {
+                        from_to: vec![(current, (*k, new_value))], removed: vec![], metadata
+                    });
+                }
+                Err(idx) => {
+                    let new_value = f(None);
+                    self.store.insert(idx, (*k, new_value.clone()));
+                    self.fire_event(|| StoreEvent::Added {
+                        added: new_value, metadata
+                    })
+                }
+            }
+        }
     }
 
     #[inline]
@@ -310,6 +352,8 @@ impl<K, T, M> Index<usize> for Store<K, T, M> where K: Ord + Copy, T: Clone {
 
 #[cfg(test)]
 mod tests {
+    use crate::store::StoreEvent;
+
     use super::Store;
 
     #[test]
@@ -356,5 +400,80 @@ mod tests {
         assert_eq!(idx, 0);
         assert_eq!(itr.len(), 1);
         assert_eq!(itr[0], (10, "10"));
+    }
+
+    #[test]
+    fn replace() {
+        let mut store = Store::new(false);
+        store.add(10, "10".to_owned(), "");
+
+        store.replace(&10, "foo", |v| {
+            format!("{}2", v.unwrap())
+        });
+
+        assert_eq!(store.len(), 1);
+        assert_eq!(store[0].0, 10);
+        assert_eq!(store[0].1, "102".to_owned());
+
+        store.replace(&20, "foo", |v| {
+            assert_eq!(v.is_none(), true);
+            "20".to_owned()
+        });
+        assert_eq!(store.len(), 2);
+        assert_eq!(store[0].0, 10);
+        assert_eq!(store[0].1, "102".to_owned());
+        assert_eq!(store[1].0, 20);
+        assert_eq!(store[1].1, "20".to_owned());
+    }
+
+    #[test]
+    fn replace_with_event() {
+        let mut store = Store::new(true);
+        store.add(10, "10".to_owned(), "");
+        store.clear_events();
+
+        store.replace(&10, "foo", |v| {
+            format!("{}2", v.unwrap())
+        });
+        let events = store.events();
+        assert_eq!(events.len(), 1);
+        if let StoreEvent::Changed { from_to, removed, metadata } = &events[0] {
+            assert_eq!(from_to.len(), 1);
+            assert_eq!(removed.len(), 0);
+            assert_eq!(*metadata, "foo");
+
+            let (from, to) = &from_to[0];
+            assert_eq!(from.0, 10);
+            assert_eq!(from.1, "10".to_owned());
+            assert_eq!(to.0, 10);
+            assert_eq!(to.1, "102".to_owned());
+        } else {
+            panic!("Unexpected event {:?}", events);
+        }
+
+        assert_eq!(store.len(), 1);
+        assert_eq!(store[0].0, 10);
+        assert_eq!(store[0].1, "102".to_owned());
+        store.clear_events();
+
+        store.replace(&20, "bar", |v| {
+            assert_eq!(v.is_none(), true);
+            "20".to_owned()
+        });
+        assert_eq!(store.len(), 2);
+        assert_eq!(store[0].0, 10);
+        assert_eq!(store[0].1, "102".to_owned());
+        assert_eq!(store[1].0, 20);
+        assert_eq!(store[1].1, "20".to_owned());
+
+        let events = store.events();
+        assert_eq!(events.len(), 1);
+        if let StoreEvent::Added { added, metadata } = &events[0] {
+            assert_eq!(*added, "20".to_owned());
+            assert_eq!(*metadata, "bar");
+        } else {
+            panic!("Unexpected event {:?}", events);
+        }
+
     }
 }
