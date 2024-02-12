@@ -276,6 +276,59 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         }
     }
 
+    pub fn replace_mut(&mut self, k: &K, metadata: M, f: impl FnOnce(Option<&mut T>) -> Option<T>) {
+        if self.events.is_none() {
+            match self.find(k) {
+                Ok(idx) => {
+                    let current = &mut self.store[idx];
+                    match f(Some(&mut current.1)) {
+                        None => {}
+                        Some(new_value) => {
+                            self.store[idx] = (*k, new_value);
+                        }
+                    }
+                }
+                Err(idx) => {
+                    match f(None) {
+                        None => {}
+                        Some(new_value) => {
+                            self.store.insert(idx, (*k, new_value));
+                        }
+                    }
+                }
+            }
+        } else {
+            match self.find(k) {
+                Ok(idx) => {
+                    let current = &mut self.store[idx];
+                    let backup = current.clone();
+                    let new_value = match f(Some(&mut current.1)) {
+                        None => current.1.clone(),
+                        Some(new_value) => {
+                            self.store[idx] = (*k, new_value.clone());
+                            new_value
+                        }
+                    };
+                
+                    self.fire_event(|| StoreEvent::Changed {
+                        from_to: vec![(backup, (*k, new_value))], removed: vec![], metadata
+                    });
+                }
+                Err(idx) => {
+                    match  f(None) {
+                        None => {}
+                        Some(value) => {
+                            self.store.insert(idx, (*k, value.clone()));
+                            self.fire_event(|| StoreEvent::Added {
+                                added: value, metadata
+                            })
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[inline]
     pub fn head_entry_option(&self) -> Option<&(K, T)> {
         self.iter().next()
@@ -475,5 +528,117 @@ mod tests {
             panic!("Unexpected event {:?}", events);
         }
 
+    }
+
+    #[test]
+    fn replace_mut_with_events() {
+        let mut store: Store<i32, Vec<i32>, &str> = Store::new(true);
+        store.replace_mut(&10, "meta", |opt| {
+            assert_eq!(opt, None);
+            None
+        });
+        assert_eq!(store.len(), 0);
+        assert_eq!(store.events().len(), 0);
+
+        store.replace_mut(&10, "meta", |opt| {
+            assert_eq!(opt, None);
+            Some(vec![1, 2, 3])
+        });
+        let events = store.events();
+        assert_eq!(events.len(), 1);
+        if let StoreEvent::Added { added, metadata } = &events[0] {
+            assert_eq!(added, &vec![1, 2, 3]);
+            assert_eq!(*metadata, "meta");
+        } else {
+            panic!("Unexpected event {:?}", events);
+        }
+        assert_eq!(store.len(), 1);
+        assert_eq!(store[0], (10, vec![1, 2, 3]));
+        store.clear_events();
+
+        // In-place update
+        store.replace_mut(&10, "meta", |opt| {
+            if let Some(value) = opt {
+                value[0] = 100;
+                None
+            } else {
+                panic!("Unexpected state.");
+            }
+        });
+        let events = store.events();
+        assert_eq!(events.len(), 1);
+        if let StoreEvent::Changed { from_to, removed, metadata } = &events[0] {
+            assert_eq!(from_to.len(), 1);
+            let from_to = &from_to[0];
+            assert_eq!(from_to, &((10, vec![1, 2, 3]), (10, vec![100, 2, 3])));
+            assert_eq!(removed.len(), 0);
+            assert_eq!(*metadata, "meta");
+        } else {
+            panic!("Unexpected event {:?}", events);
+        }
+        assert_eq!(store.len(), 1);
+        assert_eq!(store[0], (10, vec![100, 2, 3]));
+        store.clear_events();
+
+        store.replace_mut(&10, "meta", |opt| {
+            if let Some(value) = opt {
+                Some(vec![2, 3, 4])
+            } else {
+                panic!("Unexpected state.");
+            }
+        });
+        let events = store.events();
+        assert_eq!(events.len(), 1);
+        if let StoreEvent::Changed { from_to, removed, metadata } = &events[0] {
+            assert_eq!(from_to.len(), 1);
+            let from_to = &from_to[0];
+            assert_eq!(from_to, &((10, vec![100, 2, 3]), (10, vec![2, 3, 4])));
+            assert_eq!(removed.len(), 0);
+            assert_eq!(*metadata, "meta");
+        } else {
+            panic!("Unexpected event {:?}", events);
+        }
+        assert_eq!(store.len(), 1);
+        assert_eq!(store[0], (10, vec![2, 3, 4]));
+        store.clear_events();
+     }
+
+    #[test]
+    fn replace_mut() {
+        let mut store: Store<i32, Vec<i32>, ()> = Store::new(false);
+        store.replace_mut(&10, (), |opt| {
+            assert_eq!(opt, None);
+            None
+        });
+        assert_eq!(store.len(), 0);
+
+        store.replace_mut(&10, (), |opt| {
+            assert_eq!(opt, None);
+            Some(vec![1, 2, 3])
+        });
+        assert_eq!(store.len(), 1);
+        assert_eq!(store[0], (10, vec![1, 2, 3]));
+
+        // In-place update
+        store.replace_mut(&10, (), |opt| {
+            if let Some(value) = opt {
+                value[0] = 100;
+                None
+            } else {
+                panic!("Unexpected state.");
+            }
+        });
+        assert_eq!(store.len(), 1);
+        assert_eq!(store[0], (10, vec![100, 2, 3]));
+
+        store.replace_mut(&10, (), |opt| {
+            if let Some(value) = opt {
+                Some(vec![2, 3, 4])
+            } else {
+                panic!("Unexpected state.");
+            }
+        });
+        assert_eq!(store.len(), 1);
+        assert_eq!(store[0], (10, vec![2, 3, 4]));
     }
 }
