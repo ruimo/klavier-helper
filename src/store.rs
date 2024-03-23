@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, ops::{Bound, Index, RangeBounds}, slice::Iter};
+use std::{borrow::Borrow, ops::{Bound, Deref, Index, RangeBounds}, slice::Iter};
 
 #[derive(Clone, Debug)]
 pub enum StoreEvent<K, T, M> {
@@ -21,8 +21,10 @@ impl<K: Ord + Copy, T: Clone, M> AsRef<Vec<(K, T)>> for Store<K, T, M> {
     }
 }
 
-impl<K: Ord + Copy, T: Clone, M> Borrow<[(K, T)]> for Store<K, T, M> {
-    fn borrow(&self) -> &[(K, T)] {
+impl<K: Ord + Copy, T: Clone, M> Deref for Store<K, T, M> {
+    type Target = [(K, T)];
+    
+    fn deref(&self) -> &Self::Target {
         &self.store
     }
 }
@@ -411,10 +413,8 @@ impl<K, T, M> Index<usize> for Store<K, T, M> where K: Ord + Copy, T: Clone {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Borrow;
-
+    use std::convert::AsRef;
     use crate::store::StoreEvent;
-
     use super::Store;
 
     #[test]
@@ -654,19 +654,19 @@ mod tests {
     fn borrow() {
         let mut store: Store<i32, String, ()> = Store::new(false);
         {
-            let b: &[(i32, String)] = store.borrow();
+            let b: &[(i32, String)] = &store;
             assert_eq!(b.len(), 0);
         }
 
         store.add(1, "Hello".to_owned(), ());
         {
-            let b: &[(i32, String)] = store.borrow();
+            let b: &[(i32, String)] = &store;
             assert_eq!(b.len(), 1);
             assert_eq!(b[0], (1, "Hello".to_owned()));
         }
 
         store.add(100, "World".to_owned(), ());
-        let b: &[(i32, String)] = store.borrow();
+        let b: &[(i32, String)] = &store;
         assert_eq!(b.len(), 2);
         assert_eq!(b[0], (1, "Hello".to_owned()));
         assert_eq!(b[1], (100, "World".to_owned()));
