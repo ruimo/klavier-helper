@@ -12,5 +12,4 @@ repository = "https://github.com/ruimo/klavier-helper"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tracing = "0"
-tracing-subscriber = { version= "0", features = ["env-filter"]}
+
