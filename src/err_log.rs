@@ -57,16 +57,22 @@ impl Logs {
     }
 
     pub fn info<S: Into<String>>(&mut self, text: S) {
+        let text: String = text.into();
+        tracing::info!("{}", text);
         self.trim();
         self.logs.push_back(Entry::info(text));
     }
 
     pub fn warn<S: Into<String>>(&mut self, text: S) {
+        let text: String = text.into();
+        tracing::warn!("{}", text);
         self.trim();
         self.logs.push_back(Entry::warn(text));
     }
 
     pub fn err<S: Into<String>>(&mut self, text: S) {
+        let text: String = text.into();
+        tracing::error!("{}", text);
         self.trim();
         self.logs.push_back(Entry::err(text));
     }

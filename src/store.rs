@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, ops::{Bound, Deref, Index, RangeBounds}, slice::Iter};
+use std::{ops::{Bound, Deref, Index, RangeBounds}, slice::Iter};
 
 #[derive(Clone, Debug)]
 pub enum StoreEvent<K, T, M> {
@@ -413,7 +413,6 @@ impl<K, T, M> Index<usize> for Store<K, T, M> where K: Ord + Copy, T: Clone {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::AsRef;
     use crate::store::StoreEvent;
     use super::Store;
 
