@@ -32,9 +32,23 @@ pub fn sliding<'a, T>(z: &'a mut dyn Iterator<Item = T>) -> impl Iterator<Item =
   Sliding::<'a, T> { z, prev: None }
 }
 
+pub fn merge_option<T, F>(opt0: Option<T>, opt1: Option<T>, f: F) -> Option<T>
+    where F: FnOnce(T, T) -> T
+{
+    if let Some(a) = opt0 {
+        if let Some(b) = opt1 {
+            Some(f(a, b))
+        } else {
+            Some(a)
+        }
+    } else {
+        opt1
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::sliding;
+    use crate::{merge_option, sliding};
 
   #[test]
   fn empty() {
@@ -69,5 +83,13 @@ mod tests {
     assert_eq!(s.next(), Some((&"One", &"Two")));
     assert_eq!(s.next(), Some((&"Two", &"Three")));
     assert_eq!(s.next(), None);
+  }
+
+  #[test]
+  fn can_merge_option() {
+      assert_eq!(merge_option(None, None, |_, _| 0), None);
+      assert_eq!(merge_option(Some(1), None, |_, _| 2), Some(1));
+      assert_eq!(merge_option(None, Some(1), |_, _| 2), Some(1));
+      assert_eq!(merge_option(Some(1), Some(2), |v0, v1| v0 + v1), Some(3));
   }
 }
