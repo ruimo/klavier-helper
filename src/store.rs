@@ -353,6 +353,24 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
             locator: None,
         }
     }
+
+    pub fn retain_values<F>(&mut self, metadata: M, f: F) -> Vec<(K, T)>
+      where F: Fn(&T) -> bool, K: Clone, T: Clone
+    {
+        let mut removed: Vec<(K, T)> = vec![];
+
+        self.store.retain(|(k, v)| {
+            if !f(v) {
+                removed.push((k.clone(), v.clone()));
+                false
+            } else {
+                true
+            }
+        });
+
+        self.fire_event(|| StoreEvent::BulkAddedRemoved { added: vec![], removed: removed.clone(), metadata });
+        removed
+    }
 }
 
 pub struct Finder<'a, K: Ord + Copy, T: Clone, M> {
@@ -669,5 +687,32 @@ mod tests {
         assert_eq!(b.len(), 2);
         assert_eq!(b[0], (1, "Hello".to_owned()));
         assert_eq!(b[1], (100, "World".to_owned()));
+    }
+
+    #[test]
+    fn retain() {
+        let mut store: Store<i32, &str, i32> = Store::new(true);
+        store.add(0, "0", 0);
+        store.add(1, "11", 0);
+        store.add(2, "22", 0);
+        store.add(3, "3", 0);
+
+        store.clear_events();
+        let removed = store.retain_values(123, |v| v.len() == 1);
+        assert_eq!(store.len(), 2);
+        assert_eq!(store.get(0).unwrap(), &(0, "0"));
+        assert_eq!(store.get(1).unwrap(), &(3, "3"));
+        assert_eq!(removed, vec![(1, "11"), (2, "22")]);
+
+        let events = store.events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            StoreEvent::BulkAddedRemoved { added, removed, metadata } => {
+                assert_eq!(added.len(), 0);
+                assert_eq!(removed, &vec![(1, "11"), (2, "22")]);
+                assert_eq!(metadata, &123);
+            }
+            _ => panic!("Logic error."),
+        }
     }
 }

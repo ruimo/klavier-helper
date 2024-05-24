@@ -260,6 +260,28 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         removed
     }
 
+    pub fn retain_values<F>(&mut self, metadata: M, f: F) -> Vec<(K, T)>
+      where F: Fn(&T) -> bool, K: Clone
+    {
+        let mut removed: Vec<(K, T)> = vec![];
+
+        self.store.retain(|k, v| {
+            let mut i = 0;
+            while i < v.len() {
+                if !f(&v[i]) {
+                    removed.push((k.clone(), v.remove(i)));
+                    self.count -= 1;
+                } else {
+                    i += 1;
+                }
+            }
+            ! v.is_empty()
+        });
+
+        self.fire_event(|| BagStoreEvent::BulkAddedRemoved { added: vec![], removed: removed.clone(), metadata });
+        removed
+    }
+
     #[inline]
     pub fn len(&self) -> usize {
         self.count
@@ -581,5 +603,32 @@ mod tests {
 
         let mut z = store.range(NanFreeF32::from(2.1)..);
         assert_eq!(z.next(), None);
+    }
+
+    #[test]
+    fn retain() {
+        let mut store: BagStore<i32, &str, i32> = BagStore::new(true);
+        store.add(0, "0", 0);
+        store.add(0, "00", 0);
+        store.add(1, "11", 0);
+        store.add(2, "2", 0);
+
+        store.clear_events();
+        let removed = store.retain_values(123, |v| v.len() == 1);
+        assert_eq!(store.len(), 2);
+        assert_eq!(store.get(0), &vec!["0"]);
+        assert_eq!(store.get(2), &vec!["2"]);
+        assert_eq!(removed, vec![(0, "00"), (1, "11")]);
+
+        let events = store.events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            BagStoreEvent::BulkAddedRemoved { added, removed, metadata } => {
+                assert_eq!(added.len(), 0);
+                assert_eq!(removed, &vec![(0, "00"), (1, "11")]);
+                assert_eq!(metadata, &123);
+            }
+            _ => panic!("Logic error."),
+        }
     }
 }
