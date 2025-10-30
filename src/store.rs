@@ -347,7 +347,7 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         self.store.is_empty()
     }
 
-    pub fn finder(&self) -> Finder<K, T, M> {
+    pub fn finder(&self) -> Finder<'_, K, T, M> {
         Finder {
             store: self,
             locator: None,

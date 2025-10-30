@@ -1,32 +1,44 @@
 use std::{cell::RefCell, collections::{vec_deque, VecDeque}, rc::{Rc, Weak}, time::SystemTime};
 
+/// Represents the severity level of a log entry
 #[derive(PartialEq, Debug, Clone)]
 pub enum Severity {
+    /// Informational message, lowest severity
     Info,
+    /// Warning message, medium severity
     Warn,
+    /// Error message, highest severity
     Err,
 }
 
+/// A log entry with timestamp, severity level, and message text
 #[derive(PartialEq, Debug, Clone)]
 pub struct Entry {
+    /// When the log entry was created
     pub time: SystemTime,
+    /// The severity level of the log entry
     pub severity: Severity,
+    /// The message text
     pub text: String,
 }
 
 impl Entry {
+    /// Creates a new info-level log entry with the current timestamp
     pub fn info<S: Into<String>>(text: S) -> Self {
         Self::new(SystemTime::now(), Severity::Info, text)
     }
 
+    /// Creates a new warning-level log entry with the current timestamp
     pub fn warn<S: Into<String>>(text: S) -> Self {
         Self::new(SystemTime::now(), Severity::Warn, text)
     }
 
+    /// Creates a new error-level log entry with the current timestamp
     pub fn err<S: Into<String>>(text: S) -> Self {
         Self::new(SystemTime::now(), Severity::Err, text)
     }
 
+    /// Creates a new log entry with the specified timestamp, severity, and text
     pub fn new<S: Into<String>>(time: SystemTime, severity: Severity, text: S) -> Self {
         Self {
             time,
@@ -36,10 +48,15 @@ impl Entry {
     }
 }
 
+/// Observer interface for log entries
+///
+/// Implement this trait to receive notifications when new log entries are added
 pub trait Observer {
+    /// Called when a new log entry is added
     fn notify(&mut self, entry: &Entry);
 }
 
+/// A log storage with a fixed maximum size and observer pattern support
 pub struct Logs {
     size: usize,
     logs: VecDeque<Entry>,
@@ -47,6 +64,7 @@ pub struct Logs {
 }
 
 impl Logs {
+    /// Creates a new log storage with the specified maximum size
     pub fn new(size: usize) -> Self {
         Self {
             size,
@@ -55,6 +73,10 @@ impl Logs {
         }
     }
     
+    /// Adds an observer that will be notified when new log entries are added
+    ///
+    /// The observer is stored as a weak reference, so it will be automatically
+    /// removed when it's no longer referenced elsewhere
     pub fn add_observer(&mut self, observer: Rc<RefCell<dyn Observer>>) {
         self.observers.push(Rc::downgrade(&observer));
     }
@@ -68,30 +90,38 @@ impl Logs {
     
     fn append_log(&mut self, e: Entry) {
         self.trim();
-        for observer in &self.observers {
+        
+        // Simultaneously clean up dropped observers and notify active ones
+        self.observers.retain(|observer| {
             if let Some(obs) = observer.upgrade() {
                 obs.borrow_mut().notify(&e);
+                true
+            } else {
+                false
             }
-        }
+        });
+        
         self.logs.push_back(e);
     }
 
+    /// Adds an informational log entry with the given text
     pub fn info<S: Into<String>>(&mut self, text: S) {
-        let text: String = text.into();
         self.append_log(Entry::info(text));
     }
 
+    /// Adds a warning log entry with the given text
     pub fn warn<S: Into<String>>(&mut self, text: S) {
-        let text: String = text.into();
         self.append_log(Entry::warn(text));
     }
 
+    /// Adds an error log entry with the given text
     pub fn err<S: Into<String>>(&mut self, text: S) {
-        let text: String = text.into();
         self.append_log(Entry::err(text));
     }
 
-    /// Oldest first order. You can call rev() to reverse the order.
+    /// Returns an iterator over the log entries in oldest-first order
+    ///
+    /// You can call rev() on the returned iterator to get newest-first order.
     pub fn logs(&self) -> vec_deque::Iter<'_, Entry> {
         self.logs.iter()
     }
