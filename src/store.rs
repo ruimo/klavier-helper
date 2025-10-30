@@ -162,8 +162,8 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         // Adding 'to's may replace the existing.
         let mut removed = vec![];
         for (_, (k, v)) in result.iter() {
-            if let Some(r) = self.add_internal(k.clone(), v.clone()) {
-                removed.push((k.clone(), r));
+            if let Some(r) = self.add_internal(*k, v.clone()) {
+                removed.push((*k, r));
             }
         }
         self.fire_event(|| StoreEvent::Changed { from_to: result, removed: removed.clone(), metadata });
@@ -174,7 +174,7 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
         let mut removed = vec![];
 
         for (k, v) in recs.iter() {
-            if let Some(r) = self.add_internal(k.clone(), v.clone()) {
+            if let Some(r) = self.add_internal(*k, v.clone()) {
                 removed.push((*k, r));
             }
         }
@@ -361,7 +361,7 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
 
         self.store.retain(|(k, v)| {
             if !f(v) {
-                removed.push((k.clone(), v.clone()));
+                removed.push((*k, v.clone()));
                 false
             } else {
                 true
@@ -409,12 +409,10 @@ impl <'a, K: Ord + Copy, T: Clone, M> Finder<'a, K, T, M> {
                     } else {
                         self.find_locator(k).map(|l| &self.store[l])
                     }
+                } else if self.store[locator].0 <= k && k < self.store[locator + 1].0 {
+                    Some(&self.store[locator])
                 } else {
-                    if self.store[locator].0 <= k && k < self.store[locator + 1].0 {
-                        Some(&self.store[locator])
-                    } else {
-                        self.find_locator(k).map(|l| &self.store[l])
-                    }
+                    self.find_locator(k).map(|l| &self.store[l])
                 }
             None => self.find_locator(k).map(|l| &self.store[l])
         }
@@ -474,7 +472,7 @@ mod tests {
         let mut store = Store::new(false);
         store.add(10, "10", "");
 
-        let (idx, mut itr) = store.range(0..=i32::MAX);
+        let (idx, itr) = store.range(0..=i32::MAX);
         assert_eq!(idx, 0);
         assert_eq!(itr.len(), 1);
         assert_eq!(itr[0], (10, "10"));
@@ -494,7 +492,7 @@ mod tests {
         assert_eq!(store[0].1, "102".to_owned());
 
         store.replace(&20, "foo", |v| {
-            assert_eq!(v.is_none(), true);
+            assert!(v.is_none());
             "20".to_owned()
         });
         assert_eq!(store.len(), 2);
@@ -535,7 +533,7 @@ mod tests {
         store.clear_events();
 
         store.replace(&20, "bar", |v| {
-            assert_eq!(v.is_none(), true);
+            assert!(v.is_none());
             "20".to_owned()
         });
         assert_eq!(store.len(), 2);
@@ -606,7 +604,7 @@ mod tests {
         store.clear_events();
 
         store.replace_mut(&10, "meta", |opt| {
-            if let Some(value) = opt {
+            if let Some(_value) = opt {
                 Some(vec![2, 3, 4])
             } else {
                 panic!("Unexpected state.");
@@ -657,7 +655,7 @@ mod tests {
         assert_eq!(store[0], (10, vec![100, 2, 3]));
 
         store.replace_mut(&10, (), |opt| {
-            if let Some(value) = opt {
+            if let Some(_value) = opt {
                 Some(vec![2, 3, 4])
             } else {
                 panic!("Unexpected state.");
@@ -700,7 +698,7 @@ mod tests {
         store.clear_events();
         let removed = store.retain_values(123, |v| v.len() == 1);
         assert_eq!(store.len(), 2);
-        assert_eq!(store.get(0).unwrap(), &(0, "0"));
+        assert_eq!(store.first().unwrap(), &(0, "0"));
         assert_eq!(store.get(1).unwrap(), &(3, "3"));
         assert_eq!(removed, vec![(1, "11"), (2, "22")]);
 

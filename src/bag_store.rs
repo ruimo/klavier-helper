@@ -1,5 +1,8 @@
 use std::{collections::{BTreeMap, btree_map::{Entry, self}}, borrow::Borrow, ops::RangeBounds};
 
+/// Type alias for a change entry representing (from, to) pairs
+pub type ChangeEntry<K, T> = ((K, T), (K, T));
+
 #[derive(Clone)]
 pub enum BagStoreEvent<K, T, M> {
     Added { added: T, metadata: M },
@@ -7,7 +10,7 @@ pub enum BagStoreEvent<K, T, M> {
     Removed(T),
     RemovedVec(Vec<T>),
     ClearedAll,
-    Changed { from_to: Vec<((K, T), (K, T))>, removed: Vec<(K, T)>, metadata: M },
+    Changed { from_to: Vec<ChangeEntry<K, T>>, removed: Vec<(K, T)>, metadata: M },
     BulkAddedRemoved { added: Vec<(K, T)>, removed: Vec<(K, T)>, metadata: M },
 }
 
@@ -89,7 +92,7 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         }
     }
     
-    pub fn get<'a>(&'a self, key: K) -> &'a Vec<T> {
+    pub fn get(&self, key: K) -> &Vec<T> {
         self.store.get(&key).unwrap_or(&self.empty)
     }
 
@@ -125,7 +128,7 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
     
     // Does not notify observers.
     fn add_internal(&mut self, key: K, e: T) where K: Clone, T: Clone {
-        self.store.entry(key.clone()).or_insert(Vec::new()).push(e.clone());
+        self.store.entry(key.clone()).or_default().push(e.clone());
         self.count += 1;
     }
     
@@ -159,12 +162,12 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         ret
     }
     
-    pub fn remove_vec(&mut self, key: &K, value_table: &Vec<T>) where K: Clone, T: Clone {
+    pub fn remove_vec(&mut self, key: &K, value_table: &[T]) where K: Clone, T: Clone {
         let removed: Vec<T> = self.remove_vec_internal(key, value_table);
         self.fire_event(|| BagStoreEvent::RemovedVec(removed));
     }
     
-    fn remove_vec_internal(&mut self, key: &K, value_table: &Vec<T>) -> Vec<T> where K: Clone, T: Clone {
+    fn remove_vec_internal(&mut self, key: &K, value_table: &[T]) -> Vec<T> where K: Clone, T: Clone {
         let mut removed: Vec<T> = vec![];
         if let Some(cur) = self.store.get_mut(key) {
             for e in value_table.iter() {
@@ -180,7 +183,7 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
     // Does not notify observers
     fn remove_internal(&mut self, key: &K, e: &T) -> Option<T> where T: Clone {
         let mut entry_becomes_empty = false;
-        let ret = self.store.get_mut(&key).and_then(|vec| {
+        let ret = self.store.get_mut(key).and_then(|vec| {
             vec.iter().position(|o| *o == *e).map(|idx| {
                 let e = vec.remove(idx);
                 if vec.is_empty() {
@@ -191,7 +194,7 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         });
         if ret.is_some() {
             if entry_becomes_empty {
-                self.store.remove(&key);
+                self.store.remove(key);
             }
             self.count -= 1;
         }
@@ -221,8 +224,8 @@ impl<K, T, M> BagStore<K, T, M> where K:Ord + 'static, T: PartialEq + Clone + 's
         }
     }
 
-    pub fn change(&mut self, from_to: &[((K, T), (K, T))], metadata: M) where T: Clone, K: Clone {
-        let mut result: Vec<((K, T), (K, T))> = Vec::with_capacity(from_to.len());
+    pub fn change(&mut self, from_to: &[ChangeEntry<K, T>], metadata: M) where T: Clone, K: Clone {
+        let mut result: Vec<ChangeEntry<K, T>> = Vec::with_capacity(from_to.len());
 
         // Remove all 'from's in advance because adding 'to' will replace(remove) the existing 'from'.
         for ((from_k, from_v), to) in from_to.iter() {
@@ -499,7 +502,7 @@ mod tests {
         store.add(0.0.into(), "Hello", 0);
         store.add(0.0.into(), "World", 0);
         
-        store.change(&vec![((0.0.into(), "Hello"), (1.0.into(), "Foo"))], 123);
+        store.change(&[((0.0.into(), "Hello"), (1.0.into(), "Foo"))], 123);
         
         let vec0 = store.get(0.0.into());
         assert_eq!(vec0.len(), 1);

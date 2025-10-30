@@ -77,7 +77,7 @@ mod tests {
 
   #[test]
   fn many() {
-    let tbl = vec!["One", "Two", "Three"];
+    let tbl = ["One", "Two", "Three"];
     let mut z = tbl.iter();
     let mut s = sliding(&mut z);
     assert_eq!(s.next(), Some((&"One", &"Two")));
