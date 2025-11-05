@@ -350,7 +350,6 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
     pub fn finder(&self) -> Finder<'_, K, T, M> {
         Finder {
             store: self,
-            locator: None,
         }
     }
 
@@ -375,46 +374,111 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
 
 pub struct Finder<'a, K: Ord + Copy, T: Clone, M> {
     store: &'a Store<K, T, M>,
-    locator: Option<usize>,
 }
 
 impl <'a, K: Ord + Copy, T: Clone, M> Finder<'a, K, T, M> {
-    fn find_locator(&mut self, k: K) -> Option<usize> {
-        match self.store.index(k) {
-            Ok(idx) => {
-                Some(idx)
-            }
+    /// Finds the entry with the largest key that is less than or equal to the given key.
+    ///
+    /// This method performs a binary search to find the entry whose key is:
+    /// - Equal to `k` (exact match), or
+    /// - The largest key that is less than `k` (closest predecessor)
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - The key to search for
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&(K, T))` - A reference to the entry with key <= `k`
+    /// * `None` - If the store is empty or all keys are greater than `k`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use klavier_helper::store::Store;
+    /// let mut store: Store<i32, &str, ()> = Store::new(false);
+    /// store.add(10, "ten", ());
+    /// store.add(20, "twenty", ());
+    /// store.add(30, "thirty", ());
+    ///
+    /// let finder = store.finder();
+    /// assert_eq!(finder.just_before(5), None);           // No key <= 5
+    /// assert_eq!(finder.just_before(10), Some(&(10, "ten")));     // Exact match
+    /// assert_eq!(finder.just_before(15), Some(&(10, "ten")));     // 10 is the largest key <= 15
+    /// assert_eq!(finder.just_before(25), Some(&(20, "twenty")));  // 20 is the largest key <= 25
+    /// assert_eq!(finder.just_before(100), Some(&(30, "thirty"))); // 30 is the largest key <= 100
+    /// ```
+    ///
+    /// # Performance
+    ///
+    /// Time complexity: O(log n) where n is the number of entries in the store.
+    pub fn just_before(&self, k: K) -> Option<&(K, T)> {
+        if self.store.is_empty() {
+            return None;
+        }
+
+        match self.store.find(&k) {
+            Ok(idx) => Some(&self.store[idx]),
             Err(ins_pt) => {
                 if ins_pt == 0 {
                     None
                 } else {
-                    Some(ins_pt - 1)
+                    Some(&self.store[ins_pt - 1])
                 }
             }
         }
     }
 
-    pub fn just_before(&mut self, k: K) -> Option<&(K, T)> {
-        let len = self.store.len();
-        if len == 0 {
-            return None
+    /// Finds the entry with the smallest key that is greater than or equal to the given key.
+    ///
+    /// This method performs a binary search to find the entry whose key is:
+    /// - Equal to `k` (exact match), or
+    /// - The smallest key that is greater than `k` (closest successor)
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - The key to search for
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&(K, T))` - A reference to the entry with key >= `k`
+    /// * `None` - If the store is empty or all keys are less than `k`
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use klavier_helper::store::Store;
+    /// let mut store: Store<i32, &str, ()> = Store::new(false);
+    /// store.add(10, "ten", ());
+    /// store.add(20, "twenty", ());
+    /// store.add(30, "thirty", ());
+    ///
+    /// let finder = store.finder();
+    /// assert_eq!(finder.just_after(5), Some(&(10, "ten")));      // 10 is the smallest key >= 5
+    /// assert_eq!(finder.just_after(10), Some(&(10, "ten")));     // Exact match
+    /// assert_eq!(finder.just_after(15), Some(&(20, "twenty")));  // 20 is the smallest key >= 15
+    /// assert_eq!(finder.just_after(25), Some(&(30, "thirty")));  // 30 is the smallest key >= 25
+    /// assert_eq!(finder.just_after(30), Some(&(30, "thirty")));  // Exact match
+    /// assert_eq!(finder.just_after(100), None);                  // No key >= 100
+    /// ```
+    ///
+    /// # Performance
+    ///
+    /// Time complexity: O(log n) where n is the number of entries in the store.
+    pub fn just_after(&self, k: K) -> Option<&(K, T)> {
+        if self.store.is_empty() {
+            return None;
         }
 
-        match self.locator {
-            Some(locator) =>
-                if locator == len - 1 {
-                    let t = &self.store[locator];
-                    if t.0 <= k {
-                        Some(t)
-                    } else {
-                        self.find_locator(k).map(|l| &self.store[l])
-                    }
-                } else if self.store[locator].0 <= k && k < self.store[locator + 1].0 {
-                    Some(&self.store[locator])
+        match self.store.find(&k) {
+            Ok(idx) => Some(&self.store[idx]),
+            Err(ins_pt) => {
+                if ins_pt >= self.store.len() {
+                    None
                 } else {
-                    self.find_locator(k).map(|l| &self.store[l])
+                    Some(&self.store[ins_pt])
                 }
-            None => self.find_locator(k).map(|l| &self.store[l])
+            }
         }
     }
 }
@@ -436,7 +500,7 @@ mod tests {
     fn finder_empty() {
         let store: Store<i32, &str, &str> = Store::new(false);
 
-        let mut finder = store.finder();
+        let finder = store.finder();
         assert_eq!(finder.just_before(0), None);
         assert_eq!(finder.just_before(1), None);
     }
@@ -446,7 +510,7 @@ mod tests {
         let mut store = Store::new(false);
         store.add(10, "10", "");
 
-        let mut finder = store.finder();
+        let finder = store.finder();
         assert_eq!(finder.just_before(9), None);
         assert_eq!(finder.just_before(10), Some(&(10, "10")));
         assert_eq!(finder.just_before(11), Some(&(10, "10")));
@@ -458,13 +522,48 @@ mod tests {
         store.add(10, "10", "");
         store.add(20, "20", "");
 
-        let mut finder = store.finder();
+        let finder = store.finder();
         assert_eq!(finder.just_before(9), None);
         assert_eq!(finder.just_before(10), Some(&(10, "10")));
         assert_eq!(finder.just_before(11), Some(&(10, "10")));
         assert_eq!(finder.just_before(19), Some(&(10, "10")));
         assert_eq!(finder.just_before(20), Some(&(20, "20")));
         assert_eq!(finder.just_before(21), Some(&(20, "20")));
+    }
+
+    #[test]
+    fn finder_after_empty() {
+        let store: Store<i32, &str, &str> = Store::new(false);
+
+        let finder = store.finder();
+        assert_eq!(finder.just_after(0), None);
+        assert_eq!(finder.just_after(1), None);
+    }
+
+    #[test]
+    fn finder_after_one() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+
+        let finder = store.finder();
+        assert_eq!(finder.just_after(9), Some(&(10, "10")));
+        assert_eq!(finder.just_after(10), Some(&(10, "10")));
+        assert_eq!(finder.just_after(11), None);
+    }
+
+    #[test]
+    fn finder_after() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+
+        let finder = store.finder();
+        assert_eq!(finder.just_after(9), Some(&(10, "10")));
+        assert_eq!(finder.just_after(10), Some(&(10, "10")));
+        assert_eq!(finder.just_after(11), Some(&(20, "20")));
+        assert_eq!(finder.just_after(19), Some(&(20, "20")));
+        assert_eq!(finder.just_after(20), Some(&(20, "20")));
+        assert_eq!(finder.just_after(21), None);
     }
 
     #[test]
