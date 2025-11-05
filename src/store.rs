@@ -1,4 +1,4 @@
-use std::{ops::{Bound, Deref, Index, RangeBounds}, slice::Iter};
+use std::{cell::Cell, ops::{Bound, Deref, Index, RangeBounds}, slice::Iter};
 
 #[derive(Clone, Debug)]
 pub enum StoreEvent<K, T, M> {
@@ -350,6 +350,7 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
     pub fn finder(&self) -> Finder<'_, K, T, M> {
         Finder {
             store: self,
+            idx: Cell::new(None),
         }
     }
 
@@ -374,6 +375,7 @@ impl<K, T, M> Store<K, T, M> where K: Ord + Copy, T: Clone {
 
 pub struct Finder<'a, K: Ord + Copy, T: Clone, M> {
     store: &'a Store<K, T, M>,
+    idx: Cell<Option<usize>>,
 }
 
 impl <'a, K: Ord + Copy, T: Clone, M> Finder<'a, K, T, M> {
@@ -414,15 +416,21 @@ impl <'a, K: Ord + Copy, T: Clone, M> Finder<'a, K, T, M> {
     /// Time complexity: O(log n) where n is the number of entries in the store.
     pub fn just_before(&self, k: K) -> Option<&(K, T)> {
         if self.store.is_empty() {
+            self.idx.set(None);
             return None;
         }
 
         match self.store.find(&k) {
-            Ok(idx) => Some(&self.store[idx]),
+            Ok(idx) => {
+                self.idx.set(Some(idx));
+                Some(&self.store[idx])
+            },
             Err(ins_pt) => {
                 if ins_pt == 0 {
+                    self.idx.set(None);
                     None
                 } else {
+                    self.idx.set(Some(ins_pt - 1));
                     Some(&self.store[ins_pt - 1])
                 }
             }
@@ -467,18 +475,104 @@ impl <'a, K: Ord + Copy, T: Clone, M> Finder<'a, K, T, M> {
     /// Time complexity: O(log n) where n is the number of entries in the store.
     pub fn just_after(&self, k: K) -> Option<&(K, T)> {
         if self.store.is_empty() {
+            self.idx.set(None);
             return None;
         }
 
         match self.store.find(&k) {
-            Ok(idx) => Some(&self.store[idx]),
+            Ok(idx) => {
+                self.idx.set(Some(idx));
+                Some(&self.store[idx])
+            },
             Err(ins_pt) => {
                 if ins_pt >= self.store.len() {
+                    self.idx.set(None);
                     None
                 } else {
+                    self.idx.set(Some(ins_pt));
                     Some(&self.store[ins_pt])
                 }
             }
+        }
+    }
+
+    /// Returns the next entry after the last found index.
+    ///
+    /// This method returns the entry at the index following the one remembered
+    /// from the last call to `just_before()` or `just_after()`.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&(K, T))` - A reference to the next entry
+    /// * `None` - If no index was remembered, or if the next index is out of bounds
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use klavier_helper::store::Store;
+    /// let mut store: Store<i32, &str, ()> = Store::new(false);
+    /// store.add(10, "ten", ());
+    /// store.add(20, "twenty", ());
+    /// store.add(30, "thirty", ());
+    ///
+    /// let finder = store.finder();
+    /// finder.just_before(15);  // Finds (10, "ten") at index 0
+    /// assert_eq!(finder.next(), Some(&(20, "twenty")));  // Returns index 1
+    /// assert_eq!(finder.next(), Some(&(30, "thirty")));  // Returns index 2
+    /// assert_eq!(finder.next(), None);                   // Out of bounds
+    /// ```
+    pub fn next(&self) -> Option<&(K, T)> {
+        match self.idx.get() {
+            Some(idx) => {
+                let next_idx = idx + 1;
+                if next_idx < self.store.len() {
+                    self.idx.set(Some(next_idx));
+                    Some(&self.store[next_idx])
+                } else {
+                    None
+                }
+            }
+            None => None,
+        }
+    }
+
+    /// Returns the previous entry before the last found index.
+    ///
+    /// This method returns the entry at the index preceding the one remembered
+    /// from the last call to `just_before()` or `just_after()`.
+    ///
+    /// # Returns
+    ///
+    /// * `Some(&(K, T))` - A reference to the previous entry
+    /// * `None` - If no index was remembered, or if the previous index is out of bounds
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use klavier_helper::store::Store;
+    /// let mut store: Store<i32, &str, ()> = Store::new(false);
+    /// store.add(10, "ten", ());
+    /// store.add(20, "twenty", ());
+    /// store.add(30, "thirty", ());
+    ///
+    /// let finder = store.finder();
+    /// finder.just_after(25);  // Finds (30, "thirty") at index 2
+    /// assert_eq!(finder.prev(), Some(&(20, "twenty")));  // Returns index 1
+    /// assert_eq!(finder.prev(), Some(&(10, "ten")));     // Returns index 0
+    /// assert_eq!(finder.prev(), None);                   // Out of bounds
+    /// ```
+    pub fn prev(&self) -> Option<&(K, T)> {
+        match self.idx.get() {
+            Some(idx) => {
+                if idx > 0 {
+                    let prev_idx = idx - 1;
+                    self.idx.set(Some(prev_idx));
+                    Some(&self.store[prev_idx])
+                } else {
+                    None
+                }
+            }
+            None => None,
         }
     }
 }
@@ -811,5 +905,157 @@ mod tests {
             }
             _ => panic!("Logic error."),
         }
+    }
+
+    #[test]
+    fn finder_next_after_just_before() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+        store.add(30, "30", "");
+        store.add(40, "40", "");
+
+        let finder = store.finder();
+        
+        // Find element at index 1 (20)
+        assert_eq!(finder.just_before(25), Some(&(20, "20")));
+        
+        // Navigate forward
+        assert_eq!(finder.next(), Some(&(30, "30")));
+        assert_eq!(finder.next(), Some(&(40, "40")));
+        assert_eq!(finder.next(), None);
+    }
+
+    #[test]
+    fn finder_prev_after_just_after() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+        store.add(30, "30", "");
+        store.add(40, "40", "");
+
+        let finder = store.finder();
+        
+        // Find element at index 2 (30)
+        assert_eq!(finder.just_after(25), Some(&(30, "30")));
+        
+        // Navigate backward
+        assert_eq!(finder.prev(), Some(&(20, "20")));
+        assert_eq!(finder.prev(), Some(&(10, "10")));
+        assert_eq!(finder.prev(), None);
+    }
+
+    #[test]
+    fn finder_next_prev_mixed() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+        store.add(30, "30", "");
+        store.add(40, "40", "");
+
+        let finder = store.finder();
+        
+        // Start at index 1 (20)
+        assert_eq!(finder.just_before(20), Some(&(20, "20")));
+        
+        // Move forward
+        assert_eq!(finder.next(), Some(&(30, "30")));
+        
+        // Move backward
+        assert_eq!(finder.prev(), Some(&(20, "20")));
+        
+        // Move backward again
+        assert_eq!(finder.prev(), Some(&(10, "10")));
+        
+        // Move forward
+        assert_eq!(finder.next(), Some(&(20, "20")));
+        assert_eq!(finder.next(), Some(&(30, "30")));
+    }
+
+    #[test]
+    fn finder_next_without_initial_find() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+
+        let finder = store.finder();
+        
+        // next() without calling just_before/just_after should return None
+        assert_eq!(finder.next(), None);
+    }
+
+    #[test]
+    fn finder_prev_without_initial_find() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+
+        let finder = store.finder();
+        
+        // prev() without calling just_before/just_after should return None
+        assert_eq!(finder.prev(), None);
+    }
+
+    #[test]
+    fn finder_next_at_boundary() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+
+        let finder = store.finder();
+        
+        // Find last element
+        assert_eq!(finder.just_before(20), Some(&(20, "20")));
+        
+        // next() should return None at boundary
+        assert_eq!(finder.next(), None);
+    }
+
+    #[test]
+    fn finder_prev_at_boundary() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+
+        let finder = store.finder();
+        
+        // Find first element
+        assert_eq!(finder.just_after(10), Some(&(10, "10")));
+        
+        // prev() should return None at boundary
+        assert_eq!(finder.prev(), None);
+    }
+
+    #[test]
+    fn finder_next_after_not_found() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(30, "30", "");
+
+        let finder = store.finder();
+        
+        // just_before returns None when key is before all elements
+        assert_eq!(finder.just_before(5), None);
+        
+        // next() should return None when no index was set
+        assert_eq!(finder.next(), None);
+    }
+
+    #[test]
+    fn finder_reset_index_on_new_search() {
+        let mut store = Store::new(false);
+        store.add(10, "10", "");
+        store.add(20, "20", "");
+        store.add(30, "30", "");
+
+        let finder = store.finder();
+        
+        // First search
+        assert_eq!(finder.just_before(15), Some(&(10, "10")));
+        assert_eq!(finder.next(), Some(&(20, "20")));
+        
+        // New search should reset the index
+        assert_eq!(finder.just_after(25), Some(&(30, "30")));
+        assert_eq!(finder.prev(), Some(&(20, "20")));
     }
 }
