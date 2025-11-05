@@ -2,6 +2,7 @@ pub mod store;
 pub mod bag_store;
 pub mod nan_free_f32;
 pub mod err_log;
+pub mod fly_weight;
 
 pub struct Sliding<'a, T> where T: Clone {
   z: &'a mut dyn Iterator<Item = T>,
